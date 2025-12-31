@@ -49,8 +49,10 @@ def extract_tool_summary(tool_name: str, tool_input: dict, tool_response: str) -
         summary["input_keys"] = list(tool_input.keys())[:5]
 
     # Check for errors in response
-    if tool_response and "error" in tool_response.lower()[:100]:
-        summary["had_error"] = True
+    if tool_response:
+        response_str = json.dumps(tool_response) if isinstance(tool_response, dict) else str(tool_response)
+        if "error" in response_str.lower()[:500]:
+            summary["had_error"] = True
 
     return summary
 
