@@ -7,7 +7,10 @@ from pathlib import Path
 
 # Add parent dir to path for config import
 sys.path.insert(0, str(Path(__file__).parent))
-from config import SESSIONS_DIR, POSTS_DIR, ANTHROPIC_API_KEY, GEMINI_API_KEY
+from config import (
+    SESSIONS_DIR, POSTS_DIR, ANTHROPIC_API_KEY, GEMINI_API_KEY,
+    WORDPRESS_API_URL, WORDPRESS_USER, WORDPRESS_APP_PASSWORD, WORDPRESS_CATEGORY_ID
+)
 
 DIARY_PROMPT = """You are writing a developer diary entry. Based on the coding session below, write a personal narrative blog post.
 
@@ -204,6 +207,55 @@ generated: true
     return filepath
 
 
+def publish_to_wordpress(content: str, project_name: str, tags: list) -> dict:
+    """Publish diary post to WordPress via REST API"""
+    import base64
+    import urllib.request
+    import urllib.error
+
+    if not WORDPRESS_APP_PASSWORD:
+        print("[Vibe Diary] WORDPRESS_APP_PASSWORD not set, skipping publish", file=sys.stderr)
+        return None
+
+    # Prepare auth header
+    credentials = f"{WORDPRESS_USER}:{WORDPRESS_APP_PASSWORD}"
+    token = base64.b64encode(credentials.encode()).decode()
+
+    # Prepare post data
+    date_str = datetime.now().strftime("%B %d, %Y")
+    post_data = {
+        "title": f"Developer Diary: {project_name} - {date_str}",
+        "content": content,
+        "status": "draft",  # Publish as draft for review
+        "categories": [WORDPRESS_CATEGORY_ID],
+    }
+
+    # Convert to JSON
+    json_data = json.dumps(post_data).encode("utf-8")
+
+    # Build request
+    url = f"{WORDPRESS_API_URL}/wp-json/wp/v2/posts"
+    req = urllib.request.Request(url, data=json_data, method="POST")
+    req.add_header("Authorization", f"Basic {token}")
+    req.add_header("Content-Type", "application/json")
+
+    try:
+        with urllib.request.urlopen(req, timeout=30) as response:
+            result = json.loads(response.read().decode())
+            return {
+                "id": result.get("id"),
+                "link": result.get("link"),
+                "edit_link": f"{WORDPRESS_API_URL}/wp-admin/post.php?post={result.get('id')}&action=edit"
+            }
+    except urllib.error.HTTPError as e:
+        error_body = e.read().decode() if e.fp else ""
+        print(f"[Vibe Diary] WordPress error {e.code}: {error_body}", file=sys.stderr)
+        return None
+    except Exception as e:
+        print(f"[Vibe Diary] WordPress publish failed: {e}", file=sys.stderr)
+        return None
+
+
 def main():
     try:
         input_data = json.load(sys.stdin)
@@ -240,9 +292,22 @@ def main():
     content = generate_diary_post(activities, project_name)
 
     if content:
+        # Save locally
         filepath = save_diary_post(content, project_name, activities)
-        # Log success (visible in Claude Code output)
         print(f"[Vibe Diary] Generated: {filepath}", file=sys.stderr)
+
+        # Publish to WordPress
+        tools_used = set()
+        for act in activities:
+            if act.get("type") == "activity":
+                tools_used.add(act.get("tool", "").lower())
+        tags = ["vibe-coding", "claude-code"]
+        if "bash" in tools_used:
+            tags.append("cli")
+
+        wp_result = publish_to_wordpress(content, project_name, tags)
+        if wp_result:
+            print(f"[Vibe Diary] Published to WordPress: {wp_result['edit_link']}", file=sys.stderr)
 
     sys.exit(0)
 
