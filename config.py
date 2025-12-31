@@ -5,6 +5,16 @@ from pathlib import Path
 # Paths
 CLAUDE_DIR = Path.home() / ".claude"
 VIBE_DIARY_DIR = CLAUDE_DIR / "vibe-diary"
+
+# Load .env file if exists (for hook subprocess env vars)
+_env_file = VIBE_DIARY_DIR / ".env"
+if _env_file.exists():
+    with open(_env_file) as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                key, value = line.split("=", 1)
+                os.environ.setdefault(key.strip(), value.strip())
 SESSIONS_DIR = VIBE_DIARY_DIR / "sessions"
 POSTS_DIR = VIBE_DIARY_DIR / "posts"
 
